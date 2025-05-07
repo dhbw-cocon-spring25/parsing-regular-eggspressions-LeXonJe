@@ -142,9 +142,15 @@ public class RecursiveDescentRedeggsParser {
 
 			this.expect(']');
 			return new RegularEggspression.Literal(builder.andNothingElse());
+		} else if (this.check('ε')) {
+			this.consume();
+			return new RegularEggspression.EmptyWord();
+		} else if (this.check('∅')) {
+			this.consume();
+			return new RegularEggspression.EmptySet();
 		}
 
-		throw new RedeggsParseException("[BASE] Expected LIT, '(' or '[' but got " + this.peek(), this.cursor);
+		throw new RedeggsParseException("[BASE] Expected LIT, '(', '[', empty word or set but got " + this.peek(), this.cursor);
 	}
 
 	private boolean negation() throws RedeggsParseException {
@@ -154,7 +160,7 @@ public class RecursiveDescentRedeggsParser {
 		} else if (this.isLiteral()) {
 			return false;
 		}
-		throw new RedeggsParseException("[NEGATION] Expected '^' or LIT", this.cursor);
+		throw new RedeggsParseException("[NEGATION] Expected '^' or LIT but got " + this.peek(), this.cursor);
 	}
 
 
