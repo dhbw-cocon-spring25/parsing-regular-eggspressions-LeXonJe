@@ -38,7 +38,7 @@ public class RecursiveDescentRedeggsParser {
 	}
 
 	private boolean check(char expectedChar) {
-		return this.peek() == expectedChar;
+		return !this.isTheEnd() && this.peek() == expectedChar;
 	}
 
 	private char expect(char expectedChar) throws RedeggsParseException {
@@ -57,6 +57,8 @@ public class RecursiveDescentRedeggsParser {
 	}
 
 	private boolean isLiteral() {
+		if (this.isTheEnd()) return false;
+
 		char token = this.peek();
 		return (token == '_') || (token >= 'a' && token <= 'z') || (token >= 'A' && token <= 'Z') || (token >= '0' && token <= '9');
 	}
