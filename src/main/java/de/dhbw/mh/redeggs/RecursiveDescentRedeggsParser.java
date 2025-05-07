@@ -2,6 +2,10 @@ package de.dhbw.mh.redeggs;
 
 import com.sun.tools.jconsole.JConsoleContext;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.stream.Stream;
+
 import static de.dhbw.mh.redeggs.CodePointRange.range;
 import static de.dhbw.mh.redeggs.CodePointRange.single;
 
@@ -37,8 +41,9 @@ public class RecursiveDescentRedeggsParser {
 		return this.peek() == expectedChar;
 	}
 
-	private void expect(char expectedChar) throws RedeggsParseException {
-		if (!this.check(expectedChar)) throw new RedeggsParseException("Expected " + expectedChar + " but got " + this.peek(), this.cursor);
+	private char expect(char expectedChar) throws RedeggsParseException {
+		if (!this.check(expectedChar)) throw new RedeggsParseException("[EXPECT] Expected " + expectedChar + " but got " + this.peek(), this.cursor);
+		return this.consume();
 	}
 
 	private char consume() {
@@ -52,23 +57,25 @@ public class RecursiveDescentRedeggsParser {
 	}
 
 	private boolean isLiteral() {
-		if (!this.isTheEnd()) return false;
-
 		char token = this.peek();
 		return (token == '_') || (token >= 'a' && token <= 'z') || (token >= 'A' && token <= 'Z') || (token >= '0' && token <= '9');
 	}
 
 	private RegularEggspression regex() throws RedeggsParseException {
 		RegularEggspression concat = this.concat();
-		return union(concat);
+		return this.union(concat);
 	}
 
 	private RegularEggspression union(RegularEggspression left) throws RedeggsParseException {
 		if (this.check('|')) {
-			RegularEggspression right = this.concat();
-			return union(new RegularEggspression.Alternation(left, right));
+			this.consume();
+			RegularEggspression concat = this.concat();
+			RegularEggspression suffix = this.suffix(concat);
+			return this.union(new RegularEggspression.Alternation(left, suffix));
+		} else if (this.isTheEnd() || this.check(')')) {
+			return left; // epsilon
 		}
-		return left; // epsilon
+		throw new RedeggsParseException("[UNION] Expected '|', epsilon or ')'", this.cursor);
 	}
 
 	private RegularEggspression concat() throws RedeggsParseException {
@@ -77,29 +84,32 @@ public class RecursiveDescentRedeggsParser {
 	}
 
 	private RegularEggspression suffix(RegularEggspression left) throws RedeggsParseException {
-		try {
+		if (this.isLiteral() || this.check('(') || this.check('[')) {
 			RegularEggspression right = this.kleene();
 			return suffix(new RegularEggspression.Concatenation(left, right));
-		} catch (RedeggsParseException exception) {
+		} else if (this.check(')') || this.check('|') || this.isTheEnd()) {
 			return left; // epsilon
 		}
+		throw new RedeggsParseException("[SUFFIX] Expected LIT, '(', '[', ')', '|' or epsilon", this.cursor);
 	}
 
 	private RegularEggspression kleene() throws RedeggsParseException {
 		RegularEggspression base = this.base();
-		return star(base);
+		return this.star(base);
 	}
 
-
-	private RegularEggspression star(RegularEggspression base) {
+	private RegularEggspression star(RegularEggspression base) throws RedeggsParseException {
 		if (this.check('*')) {
+			this.consume();
 			return new RegularEggspression.Star(base);
+		} else if (this.isTheEnd() || this.isLiteral() || this.check('(') || this.check(')') || this.check('[') || this.check('|')) {
+			return base;
 		}
-		return base; // epsilon
+		throw new RedeggsParseException("[STAR] Expected *, LIT, '(', ')', '[', '|' or epsilon but got " + base.toString(), this.cursor);
 	}
 
 	private RegularEggspression base() throws RedeggsParseException {
-		if (isLiteral()) {
+		if (this.isLiteral()) {
 			char literal = this.consume();
 			// VirtualSymbol literal = this.symbolFactory.newSymbol()
 			// 		.include(single('_'), range('a', 'z'), range('A', 'Z'))
@@ -107,16 +117,90 @@ public class RecursiveDescentRedeggsParser {
 			VirtualSymbol symbol = this.symbolFactory.newSymbol().include(single(literal)).andNothingElse();
 			return new RegularEggspression.Literal(symbol);
 		} else if (this.check('(')) {
-			RegularEggspression expression = regex();
+			this.consume();
+			RegularEggspression expression = this.regex();
 			this.expect(')');
 			return expression;
 		} else if (this.check('[')) {
-			System.out.println("NOT IMPLEMENTED YET");
+			this.consume();
+
+			boolean negationIncluded = this.negation();
+			SymbolFactory.Builder builder = this.symbolFactory.newSymbol();
+
+			List<CodePointRange> inhalt = this.inhalt();
+			List<CodePointRange> range = this.range();
+
+			CodePointRange[] ranges = Stream.concat(inhalt.stream(), range.stream()).toArray(CodePointRange[]::new);
+
+			if (this.negation()) {
+				builder.exclude(ranges);
+			} else {
+				builder.include(ranges);
+			}
+
 			this.expect(']');
+			return new RegularEggspression.Literal(builder.andNothingElse());
 		}
 
-		throw new RedeggsParseException("Expected LIT, '(' or '[' but got nothing from the above.", this.cursor);
+		throw new RedeggsParseException("[BASE] Expected LIT, '(' or '[' but got " + this.peek(), this.cursor);
 	}
+
+	private boolean negation() throws RedeggsParseException {
+		if (this.check('^')) {
+			this.consume();
+			return true;
+		} else if (this.isLiteral()) {
+			return false;
+		}
+		throw new RedeggsParseException("[NEGATION] Expected '^' or LIT", this.cursor);
+	}
+
+
+	private List<CodePointRange> inhalt() throws RedeggsParseException {
+		char literal = this.consumeLiteral();
+		return this.rest(literal);
+	}
+
+	private List<CodePointRange> range() throws  RedeggsParseException {
+		if (this.isLiteral()) {
+			List<CodePointRange> inhaltRange = this.inhalt();
+			List<CodePointRange> range = this.range();
+
+			return Stream.concat(inhaltRange.stream(), range.stream()).toList();
+		} else if (this.check(']')) {
+			return new ArrayList<>();
+		}
+
+		throw new RedeggsParseException("[RANGE] Expected LIT or ']'", this.cursor);
+	}
+
+	private List<CodePointRange> rest(char left) throws RedeggsParseException {
+		if (this.check('-')) {
+			this.consume();
+			char right = this.consumeLiteral();
+
+			List<CodePointRange> range = new ArrayList<>();
+			range.add(CodePointRange.range(left, right));
+
+			return range;
+		} else if (this.isLiteral() || this.check(']')) {
+			List<CodePointRange> range = new ArrayList<>();
+			range.add(single(left));
+			return range;
+		}
+
+		throw new RedeggsParseException("[REST] Expected -, LIT or ']'", this.cursor);
+	}
+
+	private char consumeLiteral() throws RedeggsParseException {
+		if (this.isLiteral()) {
+			return this.consume();
+		}
+
+		throw new RedeggsParseException("[LIT] Expected Literal", this.cursor);
+	}
+
+
 
 	/**
 	 * Parses a regular expression string into an abstract syntax tree (AST).
@@ -131,12 +215,15 @@ public class RecursiveDescentRedeggsParser {
 	 * @throws RedeggsParseException if the parsing fails or the regex is invalid
 	 */
 	public RegularEggspression parse(String regex) throws RedeggsParseException {
-		// TODO: Implement the recursive descent parsing to convert `regex` into an AST.
-		// This is a placeholder implementation to demonstrate how to create a symbol.
-
 		this.input = regex;
 		this.cursor = 0;
 
-		return this.regex();
+		RegularEggspression expr = null;
+
+		while (!this.isTheEnd()) {
+			expr = this.regex();
+		}
+
+		return expr;
 	}
 }
