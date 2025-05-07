@@ -42,7 +42,9 @@ public class RecursiveDescentRedeggsParser {
 	}
 
 	private char expect(char expectedChar) throws RedeggsParseException {
-		if (!this.check(expectedChar)) throw new RedeggsParseException("[EXPECT] Expected " + expectedChar + " but got " + this.peek(), this.cursor);
+		if (!this.check(expectedChar)) {
+			throw new RedeggsParseException("[EXPECT] Expected " + expectedChar, this.cursor);
+		}
 		return this.consume();
 	}
 
@@ -134,7 +136,7 @@ public class RecursiveDescentRedeggsParser {
 
 			CodePointRange[] ranges = Stream.concat(inhalt.stream(), range.stream()).toArray(CodePointRange[]::new);
 
-			if (this.negation()) {
+			if (negationIncluded) {
 				builder.exclude(ranges);
 			} else {
 				builder.include(ranges);
@@ -150,7 +152,8 @@ public class RecursiveDescentRedeggsParser {
 			return new RegularEggspression.EmptySet();
 		}
 
-		throw new RedeggsParseException("[BASE] Expected LIT, '(', '[', empty word or set but got " + this.peek(), this.cursor);
+		// throw new RedeggsParseException("[BASE] Expected LIT, '(', '[', empty word or set but got " + this.peek(), this.cursor);
+		throw new RedeggsParseException("Unexpected symbol '" + this.peek() + "' at", this.cursor);
 	}
 
 	private boolean negation() throws RedeggsParseException {
